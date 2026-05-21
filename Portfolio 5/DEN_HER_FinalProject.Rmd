@@ -225,7 +225,7 @@ Encyclopedia_nrc_gg
 # Saving it
 ggsave(plot = Encyclopedia_nrc_gg, 
        here("figures","Encyclopedia_nrc_sentiment.png"), 
-       height = 49, 
+       height = 12, 
        width = 7)
         labs(x = "Word", y = "count")
 
