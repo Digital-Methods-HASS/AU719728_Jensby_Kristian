@@ -1,0 +1,230 @@
+
+```{r setup, include=FALSE}
+
+```
+
+---
+title: 'Portofolio 5: Final Project: Tracing the Enlightenment Thought in the Encyclopédie'
+author: 'Kristian Jensby'
+date: 'created on 20 May 2026 and updated `r format(Sys.time(), "%d %B, %Y")`'
+output: html_document
+---
+
+
+### Loading packages
+```{r packages}
+
+library(tidyverse)
+library(here)
+library(pdftools)
+library(tidytext)
+library(textdata) 
+library(ggwordcloud)
+```
+
+
+### Importing the Encyclopedia text by D'Alembert and Diderot:
+```{r get-document}
+Encyclopedia_path <- here("data","Diderot_Encyclopedia.pdf")
+Encyclopedia_text <- pdf_text(Encyclopedia_path)
+```
+
+### In order do to a sentiment analysis I of the Encyclopedia I need to structurise the text by doing some wrangling:
+
+- Split up pages into separate lines (separated by `\n`) using `stringr::str_split()`
+- Unnesting into regular columns using `tidyr::unnest()`
+- Removing leading/trailing white space with `stringr::str_trim()`
+
+```{r split-lines}
+Encyclopedia_df <- data.frame(Encyclopedia_text) %>% 
+  mutate(text_full = str_split(Encyclopedia_text, pattern = '\n')) %>% 
+  unnest(text_full) %>% 
+  mutate(text_full = str_trim(text_full)) 
+
+```
+
+Now each line, on each page, is its own row, with extra starting & trailing spaces removed. 
+
+### Getting the tokens (individual words) in tidy format
+
+I am using `tidytext::unnest_tokens()` (which is pulling from the `tokenizer`) package, to split columns into tokens. I am interested in *words*, so that's the token I'll use:
+
+```{r tokenize}
+Encyclopedia_tokens <- Encyclopedia_df %>% 
+  unnest_tokens(word, text_full)
+
+# Now each word has its own row
+```
+
+Counting the words
+```{r count-words}
+Encyclopedia_wc <- Encyclopedia_tokens %>% 
+  count(word) %>% 
+  arrange(-n)
+Encyclopedia_wc
+```
+
+Now I am noticing that a lot of words  show up frequently that I am not so interested in for this analysis (e.g. "the", "of", "and", etc.). These are  *stop words* and now I will remove them.
+
+### Removing stop words:
+
+I use `?stop_words` and `View(stop_words)`to look at documentation for stop words lexicons.
+
+I will *remove* stop words using `tidyr::anti_join()`:
+```{r stopwords}
+Encyclopedia_stop <- Encyclopedia_tokens %>% 
+  anti_join(stop_words) %>% 
+  select(-Encyclopedia_text)
+```
+
+Now I check the counts again: 
+```{r count-words2}
+Encyclopedia_swc <- Encyclopedia_stop %>% 
+  count(word) %>% 
+  arrange(-n)
+```
+
+### Creating a wordcloud of Encyclopedia report words for a thematic overview 
+
+
+```{r wordcloud-prep}
+
+
+
+# Filtering words into the most 80 frequent as the wordcloud as it is a simple thematic overview
+Encyclopedia_top80 <- Encyclopedia_stop %>% 
+  count(word) %>% 
+  arrange(-n) %>% 
+  head(80)
+Encyclopedia_top80
+```
+
+```{r wordcloud}
+Encyclopedia_cloud <- ggplot(data = Encyclopedia_top80, aes(label = word)) +
+  geom_text_wordcloud() +
+  theme_minimal()
+
+Encyclopedia_cloud
+```
+
+Now I am customising it a bit for the sake of the visualisation:
+```{r wordcloud-pro}
+ggplot(data = Encyclopedia_top80, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(aes(color = n), shape = "square") +
+  scale_size_area(max_size = 16) +
+  scale_color_gradientn(colors = c("blue","white","red")) +
+  theme_minimal()
+```
+
+### Sentiment analysis
+
+```{r afinn}
+
+# Downloading the afiin lexicon
+get_sentiments(lexicon = "afinn")
+
+```
+
+```{r nrc}
+#Downloading the nrc lexicon
+get_sentiments(lexicon = "nrc")
+
+```
+
+Now I am doing sentiment analysis on the Encyclopedia text data using afinn and nrc. 
+
+
+### Sentiment analysis with afinn: 
+
+First, I bind words in `Encyclopedia_stop` to `afinn` lexicon:
+```{r bind-afinn}
+Encyclopedia_afinn <- Encyclopedia_stop %>% 
+  inner_join(get_sentiments("afinn"))
+Encyclopedia_afinn
+```
+
+Finding some counts (by sentiment ranking):
+```{r count-afinn}
+Encyclopedia_afinn_hist <- Encyclopedia_afinn %>% 
+  count(value)
+
+# Plotting them: 
+ggplot(data = Encyclopedia_afinn_hist, aes(x = value, y = n)) +
+  geom_col(aes(fill = value)) +
+  theme_bw()
+```
+
+Summarisiing sentiment for the text: 
+```{r summarize-afinn}
+Encyclopedia_summary <- Encyclopedia_afinn %>% 
+  summarize(
+    mean_score = mean(value),
+    median_score = median(value)
+  )
+Encyclopedia_summary 
+```
+
+The mean and median indicate a slightly positive overall sentiments based on the AFINN lexicon. 
+
+### NRC lexicon for sentiment analysis
+
+ As above, I'll use inner_join() to combine the Encyclopedia non-stopword text with the nrc lexicon: 
+
+```{r bind-bing}
+Encyclopedia_nrc <- Encyclopedia_stop %>% 
+  inner_join(get_sentiments("nrc"))
+```
+
+Then I check which words are being excluded by using `anti_join()`:
+
+```{r check-exclusions}
+Encyclopedia_exclude <- Encyclopedia_stop %>% 
+  anti_join(get_sentiments("nrc"))
+
+# View(Encyclopedia_exclude)
+
+# Counting to find the most excluded:
+Encyclopedia_exclude_n <- Encyclopedia_exclude %>% 
+  count(word, sort = TRUE)
+
+head(Encyclopedia_exclude_n)
+```
+
+Now I find some counts: 
+```{r count-bing}
+Encyclopedia_nrc_n <- Encyclopedia_nrc %>% 
+  count(sentiment, sort = TRUE)
+
+# And I plot them:
+
+ggplot(data = Encyclopedia_nrc_n, aes(x = sentiment, y = n)) +
+  geom_col(aes(fill = sentiment))+
+  theme_bw()
+```
+
+Or I can count by sentiment and word, then facet:
+```{r count-nrc}
+Encyclopedia_nrc_n5 <- Encyclopedia_nrc %>% 
+  count(word,sentiment, sort = TRUE) %>% 
+  group_by(sentiment) %>% 
+  top_n(5) %>% 
+  ungroup()
+
+Encyclopedia_nrc_gg <- ggplot(data = Encyclopedia_nrc_n5, aes(x = reorder(word,n), y = n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, ncol = 2, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(x = "Word", y = "count")
+
+# Showing it
+Encyclopedia_nrc_gg
+
+# Saving it
+ggsave(plot = Encyclopedia_nrc_gg, 
+       here("figures","Encyclopedia_nrc_sentiment.png"), 
+       height = 49, 
+       width = 7)
+
+```
+
